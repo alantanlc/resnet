@@ -104,7 +104,6 @@ def main(args):
     val_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=args.batchSize, shuffle=True, num_workers=0, pin_memory=False)
 
     current_epoch = 0
-
     if args.checkpoint:
         model, optimizer, current_epoch = load_checkpoint(args.checkpoint, model, optimizer)
         if args.finetune:
@@ -147,3 +146,98 @@ def main(args):
 
     save_plt([training_loss, val_loss], ["train_loss", "val_loss"], args)
     save_plt([time_taken], ["time_taken"], args)
+
+def train(train_loader, model, criterion, optimizer, epoch, args):
+    correct = 0
+    total = 0
+    running_loss = 0.0
+
+    # switch to train mode
+    model.train()
+    stime = time.time()
+    for i, (input, target) in enumerate(train_loader):
+        # measure data loading time
+        target = target.float()
+        input = input.float()
+        if args.is_cuda:
+            target = target.cuda()
+            input = input.cuda()
+
+        # compute output
+        output = model(input)
+
+        # get the max probability of the softmax layer
+        loss = criterion(output, target)
+        running_loss += loss.item()
+
+        # compute gradient and do SGD step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    TT = time.time() - stime
+    running_loss = running_loss/(i+1)
+    print('Epoch: [{0}]\t'
+            'Training Loss {loss:.4f}\t'
+            'Time: {time:.2f}\t'.format(epoch, loss=running_loss, time=TT))
+
+    return running_loss, TT
+
+def validate(val_loader, model, criterion, args):
+    # switch to evaluate mode
+    model.eval()
+    total = 0
+    correct = 0
+    running_loss = 0.0
+    with torch.no_grad():
+        for i, (input, target) in enumerate(val_loader):
+            target = target.float()
+            input = input.float()
+            if args.is_cuda:
+                target = target.cuda()
+                input = input.cuda()
+            output = model(input)
+            loss = criterion(output, target)
+            running_loss += loss.item()
+    running_loss = running_loss/(i+1)
+    print('val: \t'
+            'Loss {loss:.4f}\t'.format(loss=running_loss))
+
+    return running_loss
+
+def weights_init(m):
+    if isinstance(m, nn.Conv2d):
+        nn.init.xavier_uniform_(m.weight.data)
+        # nn.init.xavier_uniform_(m.bias.data)
+
+def save_checkpoint(state, is_best, opt, filename='checkpoint.pth.tar'):
+    expr_dir = os.path.join(opt.save_dir, opt.name)
+    torch.save(state, os.path.join(expr_dir, filename))
+    if is_best:
+        torch.save(state, os.path.join(expr_dir, 'model_best.pth.tar'))
+
+def load_checkpoint(path, model, optimizer):
+    checkpoint = torch.load(path)
+    model.load_state_dict(checkpoint['state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    epoch = checkpoint['epoch']
+    return model, optimizer, epoch
+
+def save_plt(array, name, args):
+    colors = ['blue', 'red', 'green', 'pink', 'purple']
+    plt.cla()
+    plt.clf()
+    plt.close()
+    for i in range(len(array)):
+        np.savetxt(os.path.join(args.expr_dir, name[i] + '.txt'), array[i], fmt='%f')
+        plt.plot(array[i], color=colors[i], label=name[i])
+        plt.xlabel('epoch')
+        plt.legend()
+    plt.savefig(os.path.join(args.expr_dir, name[i]+'.png'))
+    plt.cla()
+    plt.clf()
+    plt.close()
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+    main(args)
